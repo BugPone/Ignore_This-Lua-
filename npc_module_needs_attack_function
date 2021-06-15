@@ -1,0 +1,535 @@
+local DEBUG_MODE = false
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+
+local m = {}
+
+m.VALUE_NAME_LAST_SEEN_TIME = "lastSeenTime"
+m.VALUE_NAME_LAST_SEEN_POS = "lastSeenPos"
+m.VALUE_NAME_TARGET_PLAYER = "targetPlayer"
+m.VALUE_NAME_SPAWN_POSITION = "spawnpoint"
+m.VALUE_NAME_LAST_ATTACK_TIME = "lastAttackTime"
+
+m.VALUE_NAME_MAX_LOST_TIME = "maxLostTime"
+m.VALUE_NAME_MAX_PATH_TIME = "maxPathTime"
+m.VALUE_NAME_ATTACK_COOLDOWN = "attackCooldown"
+m.VALUE_NAME_ATTACK_DISTANCE = "attackDistance"
+m.VALUE_NAME_MAX_CAN_SEE_DISTANCE = "maxCanSeeDistance"
+m.VALUE_NAME_MAX_WANDER_DISTANCE = "maxWanderDistance"
+m.VALUE_NAME_MAX_CHASE_DISTANCE = "maxChaseDistance"
+m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER = "minDistanceFromPlayer"
+m.VALUE_NAME_MIN_WAIT_BETWEEN_WALKS = "minWaitBetweenWalks"
+m.VALUE_NAME_MAX_WAIT_BETWEEN_WALKS = "maxWaitBetweenWalks"
+
+m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER_RANDOM_ADJUSTMENT = "minDistanceMaxRandomPercent"
+
+function m.waitForValuesFolder(character)
+	return character:WaitForChild("values")
+end
+
+function m.getValuesFolder(character)
+	return character.values
+end
+
+ function m.setState(character, stateName, newValue)
+	m.getValuesFolder(character)[stateName].Value = newValue
+end
+ function m.getState(character, stateName)
+	return m.getValuesFolder(character)[stateName]
+end
+
+ function m.getAnimationsFolder(character)
+	return character:WaitForChild("Humanoid"):WaitForChild("animations")
+end
+
+
+function m.getLostTime(character)
+
+	local lostTime =  os.time() - m.getState(character, m.VALUE_NAME_LAST_SEEN_TIME).Value
+	--	print("lost time is " .. lostTime)
+	return lostTime
+end
+
+
+function m.visualizeRay(originPos, targetPos, color)
+	local distance = (originPos - targetPos).Magnitude
+	local path = Instance.new("Part")
+	path.Name = "path"
+	path.Transparency = 0.4
+	path.BrickColor = BrickColor.new("Baby blue")
+	path.Material = Enum.Material.Neon
+	path.Anchored = true
+	path.CanCollide = false
+	path.Parent = game.Workspace
+	path.Size = Vector3.new(.2, .2, distance)
+	path.CFrame = CFrame.lookAt(originPos, targetPos)
+	path.CFrame = path.CFrame + (path.CFrame.LookVector * (distance/2))
+	Debris:AddItem(path, 1)
+	return path
+end
+
+
+
+
+--returns wether part is seen
+--sets lastSeenTime and lastSeenPos if true
+function m.canSee(character ,originPart, targetPlayer)
+
+	local targetChar = targetPlayer.Character
+	local targetPart = targetChar.PrimaryPart
+	--[[
+	--	print("testing if can see target")
+	local max_dist_from_player = 200
+	local distanceFromPlayer = (targetPart.Position - originPart.Position).Magnitude
+	--print("distance from player: " .. distanceFromPlayer)
+	if distanceFromPlayer > max_dist_from_player then --hopefully prevents hacking
+		print("too far from player")
+		return false 
+	end
+
+	local distanceFromSpawn = (originPart.Position - getState(character,"spawnpoint")).Magnitude
+	--print("distance from spawn: " .. distanceFromSpawn)
+	if distanceFromSpawn > 500 then --hopefully prevents mass stucking zombies
+		print("too far from spawn for some reason :)")
+		return false
+	end
+	]]
+
+	local function fireRay(originPos, targetPos, blacklist)
+		-- Set an origin and directional vector
+		local max_dist_from_player = 75
+		local rayOrigin = originPos
+		--local rayDirection = primaryPart.CFrame.LookVector * distance * 1.2
+		local rayDirection = (targetPos - originPos).Unit * max_dist_from_player 
+		-- Build a "RaycastParams" object and cast the ray
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterDescendantsInstances = blacklist
+		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+		local raycastResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+		return raycastResult
+	end
+	local attempts = 0
+	local blacklist = {character}
+	while #blacklist < 50 and attempts < 20 do
+		attempts = attempts + 1
+		local originPos = character.Head.Position
+		local raycastResult = fireRay(originPos, targetPlayer.Character.PrimaryPart.Position, blacklist)
+		if raycastResult then
+
+			if false then
+				local ray2 = m.visualizeRay(originPos, raycastResult.Position, BrickColor.new("Baby blue"))
+				table.insert(blacklist, ray2)
+			end
+
+			local hitPart = raycastResult.Instance
+			--print("ray hit " .. hitPart.Name)
+			if hitPart.Transparency >= 0.5 then
+				table.insert(blacklist,hitPart)
+				--print("Hit transparent, continueing on attempt: " .. attempts .. " with list size: " .. #blacklist)
+				
+				continue
+			end
+
+
+			local hitpartModel = hitPart:FindFirstAncestorWhichIsA("Model")
+			--detected non player
+			if hitpartModel:FindFirstChild("Humanoid") and Players:GetPlayerFromCharacter(hitpartModel) == nil then
+				--print("detected non human model, adding to blacklist")
+				table.insert(blacklist, hitpartModel)
+				continue
+			end
+
+
+			--local ray1 = visualizeRay(rayOrigin, targetPart.Position, distance, BrickColor.new("Really red"))
+			--table.insert(blacklist, ray1)
+			if hitPart:IsDescendantOf(targetPlayer.Character) then
+				--print("seen a player")
+				m.setState(character, m.VALUE_NAME_LAST_SEEN_TIME, os.time())
+				m.setState(character, m.VALUE_NAME_LAST_SEEN_POS, targetPart.Position)
+				m.setState(character, m.VALUE_NAME_TARGET_PLAYER, targetPlayer)
+				--			print("SETTING LAST SEEN POS TO ... ")
+				--			print(lastSeenPos)
+				return true
+			end
+
+			--print("returning default false")
+			return false
+		end
+	end
+	--print("eos failsafe SHOULD NOT RUN ERROR, returning falsee")
+	return false
+end
+
+
+--cancels walk if player is spotted by event
+--@canReturnToSpawnMidWalk - if we can cancel the walk to return to spawn
+--@tryCanseeTarget, if can see target while pathing, cancel chase. 
+function m.pathTo(character, targetPos, tryCanSeeCurrentPlayer)
+	
+	local path = PathfindingService:CreatePath()
+	path:ComputeAsync(character.PrimaryPart.Position, targetPos)
+	local waypoints = path:GetWaypoints()
+	-- Get the path waypoints
+
+	if path.Status ~= Enum.PathStatus.Success then return end
+
+	if DEBUG_MODE then
+		-- Loop through waypoints
+		for _, waypoint in pairs(waypoints) do
+			local part = Instance.new("Part")
+			part.Shape = "Ball"
+			part.Material = "Neon"
+			part.Size = Vector3.new(0.2, 0.2, 0.2)
+			part.Position = waypoint.Position
+			part.Anchored = true
+			part.CanCollide = false
+			part.Parent = character.HumanoidRootPart
+			part.Transparency = 0.6
+			Debris:AddItem(part,3)	
+		end
+	end
+
+
+	local cancelWalk = false
+
+	local event = character.ALERTER.OnServerEvent:Connect(function(player)
+		--print("alert event in PATH fired, cancelling walk from being seen")
+		--local previousLastSeenTime = m.getState(character, m.VALUE_NAME_LAST_SEEN_TIME).Value
+		if m.canSee(character, character.Head, player) == false then return end
+		--[[
+		--THIS IS SO THE FIRST CAN SEE DOES NOT RETURN A LOST TIME OF 0 TO START THE CHASE
+		if tryCanSeeCurrentPlayer == false then
+			m.setState(character, m.VALUE_NAME_LAST_SEEN_TIME, previousLastSeenTime)	
+		end
+		]]
+		cancelWalk = true
+	end)
+
+	local walkBeginTime = os.time()
+	for _, waypoint in pairs(waypoints) do
+		character.PrimaryPart:SetNetworkOwner(nil)
+
+		--[[
+		if waypoint.Action == Enum.PathWaypointAction.Jump then
+			character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+		]]
+		--try to see player
+		if(tryCanSeeCurrentPlayer) then
+			--print("path trying to see target")
+			if m.canSee(character, character.Head, m.getState(character,m.VALUE_NAME_TARGET_PLAYER).Value) then
+				--print("saw target, cancelling pathTo")
+				cancelWalk = true
+			end
+		end
+
+		local lostTime = m.getLostTime(character)
+		local MAX_LOST_TIME = m.getState(character, m.VALUE_NAME_MAX_LOST_TIME).Value
+		if tryCanSeeCurrentPlayer and lostTime > MAX_LOST_TIME then
+			--print("canceling walk in pathing, lost too long... ")
+			cancelWalk = true
+		end
+
+		local walkTime = os.time() - walkBeginTime
+		--print("walk time is: " .. walkTime)
+		if walkTime > m.getState(character,m.VALUE_NAME_MAX_PATH_TIME).Value then
+			--print("exceeded max walk time, calceling...")
+			cancelWalk = true
+		end
+
+		if cancelWalk then 
+			--print("canceling walk...")
+			event:Disconnect()
+			break 
+		end
+
+		character.Humanoid:MoveTo(waypoint.Position)
+		character.Humanoid.MoveToFinished:Wait()
+
+	end
+	event:Disconnect()
+	--	print("finished pathTo walk")
+end
+
+function m.isTooCloseToTarget(character)
+	local targetPlayer = m.getState(character, m.VALUE_NAME_TARGET_PLAYER).Value
+
+	local minDistanceFromPlayer = m.getState(character, m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER).Value
+	local distanceFromPlayer = (character.PrimaryPart.Position - targetPlayer.Character.PrimaryPart.Position).Magnitude
+	--print("dist from player: " .. distanceFromPlayer .. " -- min distance: " .. minDistanceFromPlayer)
+	if distanceFromPlayer < minDistanceFromPlayer then
+		return true
+	end
+	return false
+end
+
+function m.pathToRandom(character)
+	
+	local MAX_WANDER_TIME = 10
+	local maxWanderDistance = m.getState(character, m.VALUE_NAME_MAX_WANDER_DISTANCE).Value
+	--local halfMax = maxWanderDistance / 2
+	--	print("half max is: " .. halfMax)
+	--print("Walking randomly...")
+	local xRand = math.random(-maxWanderDistance,maxWanderDistance)
+	local zRand = math.random(-maxWanderDistance,maxWanderDistance)
+	local goal = m.getState(character, m.VALUE_NAME_SPAWN_POSITION).Value + Vector3.new(xRand,0,zRand)
+	m.pathTo(character ,goal, false)
+end
+
+function m.chase(character, attackFunction)
+	local endChase = false
+	--[[
+	--exit if new player spots zombie
+	local changedTarget = getState(character,m.VALUE_NAME_TARGET_PLAYER).Changed:Connect(function()
+		print("player value changed, ending current chase...")
+		endChase = true
+	end)
+	]]
+
+	while(wait(0.2)) do
+		if endChase then
+			--changedTarget:Disconnect()
+			return
+		end
+
+		local targetPlayer = m.getState(character, m.VALUE_NAME_TARGET_PLAYER).Value
+		--refresh shit
+		local lastAttackTime = os.time() - m.getState(character, m.VALUE_NAME_LAST_ATTACK_TIME).Value
+		local distFromPlayer = (character.PrimaryPart.Position - targetPlayer.Character.PrimaryPart.Position).Magnitude
+		local maxAttackDist = m.getState(character, m.VALUE_NAME_ATTACK_DISTANCE).Value
+		local attackCoolDown = m.getState(character, m.VALUE_NAME_ATTACK_COOLDOWN).value
+		--print("dist from player: " .. distFromPlayer)
+		--print("last attack time: " .. lastAttackTime)
+		--print("firing cansee in loop")
+		if m.canSee(character, character.Head, targetPlayer) and lastAttackTime > attackCoolDown and distFromPlayer < maxAttackDist then
+			--print("calling attack function...")
+			--attackFunction(character)
+			m.setState(character, m.VALUE_NAME_LAST_ATTACK_TIME, os.time())
+			--attackEvent:Fire()
+			attackFunction(character)
+			
+		end
+
+		--lost for too long
+		local lostTime = m.getLostTime(character)
+		local MAX_LOST_TIME = m.getState(character, m.VALUE_NAME_MAX_LOST_TIME).Value
+		if(lostTime > MAX_LOST_TIME)then
+			print("Lost the player for too long " .. lostTime)
+			endChase = true
+			continue
+		end
+		
+		local distanceFromSpawn = (character.PrimaryPart.Position - m.getState(character, m.VALUE_NAME_SPAWN_POSITION).Value).Magnitude
+		local MAX_CHASE_DISTANCE = m.getState(character, m.VALUE_NAME_MAX_CHASE_DISTANCE).Value
+		--print("distance from spawn: " .. distanceFromSpawn)
+		if distanceFromSpawn > MAX_CHASE_DISTANCE then 
+			endChase = true
+			print("reached max chase distance")
+			continue
+		end
+		
+		
+		if lostTime < 0.21 then
+			--too close to target and can see, just pause
+			if m.isTooCloseToTarget(character) and m.canSee(character, character.Head, targetPlayer) then 
+				character.Humanoid:MoveTo(character.PrimaryPart.Position)
+				--print("too close to player")
+				continue
+			end
+			character.Humanoid:MoveTo(targetPlayer.Character.PrimaryPart.Position)
+		else
+			--too close to target and can see, just pause
+			if m.isTooCloseToTarget(character) and m.canSee(character, character.Head, targetPlayer) then 
+				character.Humanoid:MoveTo(character.PrimaryPart.Position)
+				--print("too close to player")
+				continue
+			end
+			--print("pathing to not seen player")
+			m.pathTo(character, targetPlayer.Character.PrimaryPart.Position, true)
+		end
+	end --end while canSee
+	print("WARN: code should not run, but who cares")
+	return
+end
+
+
+function m.setupDefaultValues(character, maxWanderDist, maxChaseDist)
+	local valuesClone = script:WaitForChild("values"):Clone()
+	--valuesClone.Parent = character
+
+	local charValuesFolder = character:FindFirstChild("values")
+
+	if charValuesFolder == nil then
+		valuesClone.Parent = character
+		return
+	end
+
+	--else, follder exists and has or does  not have values
+	for _, valObj in pairs (valuesClone:GetChildren())do
+		local charValueObj = charValuesFolder:FindFirstChild(valObj.Name) --if obj is not already in valuesFolder of characer
+		if charValueObj == nil then 
+			--then put it in from clone		
+			valObj.Parent = charValuesFolder
+		end
+	end
+	
+	--override the maxchase and maxwander no matter what it previously was
+	m.setState(character, m.VALUE_NAME_MAX_WANDER_DISTANCE, maxWanderDist)
+	m.setState(character, m.VALUE_NAME_MAX_CHASE_DISTANCE, maxChaseDist)
+	
+	--subtract random distance adjustment
+	local minDistance = m.getState(character, m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER).Value
+
+	local minDistanceRandom = m.getState(character, m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER_RANDOM_ADJUSTMENT).Value
+	local randAdjustment = math.random(0, minDistanceRandom)
+	local randAdjustment = randAdjustment / 100
+	--print("rand adjustmetn is " .. randAdjustment)
+
+	local offset = minDistance * randAdjustment
+	local newDistance = minDistance - offset
+	m.setState(character,  m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER, newDistance)
+	--print("Min random distance from player: " .. m.getState(character, m.VALUE_NAME_MIN_DISTANCE_FROM_PLAYER).Value)
+
+
+end
+
+m.attackNoItem = function(character)
+	--[[
+	print("doing attack melee function")
+	setState(character, m.VALUE_NAME_LAST_ATTACK_TIME, os.time())
+	local humanoid = character:WaitForChild("Humanoid")
+	local animator = humanoid:WaitForChild("Animator")
+	local attackAnim = getValuesFolder(character).animations.attackAnim
+	local attackTrack = animator:LoadAnimation(attackAnim)
+	attackAnim.Priority = Enum.AnimationPriority.Action
+	]]
+	m.setState(character, m.VALUE_NAME_LAST_ATTACK_TIME, os.time())
+	print("doing attack melee function by " .. character.Name)
+	
+end
+
+
+
+
+m.setupWalker = function(character, attackFunction, maxWanderDist, maxChaseDist)
+	--print("SETUP WALKER STARTED")
+	--m.setupDefaultValues(character, maxWanderDist, maxChaseDist)
+	local function setSpawn(character, position)
+		m.setState(character, m.VALUE_NAME_SPAWN_POSITION, position)
+		
+		if DEBUG_MODE then
+	
+			local spawnPart = Instance.new("Part", character)
+			spawnPart.CanTouch = false
+			spawnPart.Name = "debug_zombie_spawn_part"
+			spawnPart.Size = Vector3.new(3,3,3)
+			spawnPart.Color = Color3.new(0.25098, 1, 0.952941)
+			spawnPart.CanCollide = false
+			spawnPart.Anchored = true
+			spawnPart.Transparency = 0.6
+			spawnPart.Position = m.getState(character, m.VALUE_NAME_SPAWN_POSITION).Value
+		end
+		
+		if DEBUG_MODE then
+			local maxWanderDistance = m.getState(character, m.VALUE_NAME_MAX_WANDER_DISTANCE).Value
+			local shape = game:GetService("ServerStorage"):WaitForChild("cylinder"):Clone()
+			shape.Transparency = 0.95
+			shape.Size = Vector3.new( 1,maxWanderDistance * 2, maxWanderDistance * 2)
+			shape.Position = m.getState(character, m.VALUE_NAME_SPAWN_POSITION).Value
+			shape.CanCollide = false
+			shape.Anchored = true
+			shape.Color = Color3.new(1, 0.666667, 0)
+			shape.Parent = character
+			shape.CanTouch = false
+			shape.Name = "debug_zombie_max_wander_distance"
+		end
+		
+		if DEBUG_MODE then
+			local shape = game:GetService("ServerStorage"):WaitForChild("cylinder"):Clone()
+			local maxChaseDistance = m.getState(character, m.VALUE_NAME_MAX_CHASE_DISTANCE).Value
+			--local shape = Instance.new("Part")
+			shape.Transparency = 0.95
+			shape.Size = Vector3.new( 1,maxChaseDistance * 2, maxChaseDistance * 2)
+			shape.Position = m.getState(character, m.VALUE_NAME_SPAWN_POSITION).Value
+			shape.CanCollide = false
+			shape.Anchored = true
+			shape.Color = Color3.new(0.905882, 0.184314, 1)
+			shape.Parent = character
+			shape.CanTouch = false
+			shape.Name = "debug_zombie_max_chase_distance"
+		end
+	end
+	
+	setSpawn(character, character.PrimaryPart.Position)
+
+	
+	--yes, we trust the client for this. Worst case scenario a player passes a bad char but cantsee so who cares. 
+	local isChasing = false
+	
+	character.ALERTER.OnServerEvent:Connect(function(player, creature)
+		if isChasing then --only fire once a second
+			return
+		end
+		print("firing cansee in basico")
+		
+		if m.canSee(creature, creature.Head, player) then
+			isChasing = true
+			m.chase(creature, attackFunction)
+			isChasing = false
+		end
+	end)
+
+	--coroutine.wrap(function()
+		--print("pathing to random")
+		while(true) do
+			if(isChasing == false) then
+				m.pathToRandom(character)
+			end
+			local minWait = m.getState(character, m.VALUE_NAME_MIN_WAIT_BETWEEN_WALKS).Value
+			local maxWait = m.getState(character, m.VALUE_NAME_MAX_WAIT_BETWEEN_WALKS).Value
+			local waitTime = math.random(minWait,maxWait)
+			--print("waiting time until next walk: " .. waitTime)
+			wait(waitTime)
+		end
+	--end)()
+end
+
+m.setupWalkAnim = function(character)
+	
+	local anims = m.getAnimationsFolder(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local animator = humanoid:WaitForChild("Animator")
+
+	local idleAnim = anims.idleAnim
+	local idleTrack = animator:LoadAnimation(idleAnim)
+	idleTrack.Priority = Enum.AnimationPriority.Idle
+
+	local walkAnim = anims.walkAnim
+	local walkTrack = animator:LoadAnimation(walkAnim)
+	walkTrack.Priority = Enum.AnimationPriority.Movement
+	
+	character.Humanoid.Running:Connect(function(speed)
+--		print("playing " .. speed)
+		if speed == 0 and idleTrack.IsPlaying == false then
+			--print("playing idle anim ")
+			walkTrack:Stop()
+			idleTrack:Play()
+		elseif speed > 0 and walkTrack.IsPlaying == false then
+			--print("playing walk anim ")
+	
+			idleTrack:Stop()
+			walkTrack:Play()
+		end
+	end)
+	
+end
+
+--[[
+--IM LAZY BUT CONSISTENT, TODO
+m.getState = function(character, stateName)
+	return m.getState(character, stateName)
+end
+]]
+	
+return m
