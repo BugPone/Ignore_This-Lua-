@@ -1,0 +1,150 @@
+--All "get" functions return a function that takes a character and performs an action
+
+local creatureModule = require(game:GetService("ServerStorage"):WaitForChild("modules"):FindFirstChild("creature2",true))
+local VALUE_NAME_TARGET_PLAYER = "targetPlayer" --TODO - make it not in several places :') 
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local DEBUG_MODE = true
+
+local m = {}
+
+m.CAN_DAMAGE_BOOLEAN_NAME = "canDamage"
+
+
+m.setupAttackBoolean = function(character)
+	local valuesFolder = creatureModule.waitForValuesFolder(character)
+	if valuesFolder:FindFirstChild(m.CAN_DAMAGE_BOOLEAN_NAME) then
+		print("ERROR: CANDAMAGE BOOLEAN ALREADY EXEISTS?!!?!?")
+		return
+	end
+	local canDamageBoolean = Instance.new("BoolValue")
+	canDamageBoolean.Name = m.CAN_DAMAGE_BOOLEAN_NAME
+	canDamageBoolean.Parent = valuesFolder
+	canDamageBoolean.Value = false
+	return canDamageBoolean
+end
+
+m.damageTableParts = function(character, tableOfParts)
+	local canDamage = creatureModule.getState(character, m.CAN_DAMAGE_BOOLEAN_NAME)
+	canDamage.Value = true
+	local eventsTable = {}
+	for i, part in pairs(tableOfParts) do
+		local event = part.Touched:Connect(function(other)
+			if canDamage.Value == false then return end
+			if other.Transparency > 0.5 then return end
+			local model = other:FindFirstAncestorWhichIsA("Model")
+			if Players:GetPlayerFromCharacter(model)then
+				print("damage... " .. other.Name)
+				canDamage.Value = false
+				model.Humanoid:TakeDamage(10)
+				
+			end
+		end)
+		table.insert(eventsTable,event)
+	end
+	return eventsTable
+end
+
+m.getAttackFireGun1ShotForward = function(character, numberOfShots)
+	--[[
+	local attackEvent = Instance.new("BindableEvent")
+	attackEvent.Event:Connect(function()
+		local gun = character:FindFirstChildWhichIsA("Tool")
+		local targetPlayer = creatureModule.getState(character, VALUE_NAME_TARGET_PLAYER).Value --I know this is bad design but I'm lazy
+		print("Firing zombie's gun attack...")
+
+		gun.FireEvent:Fire(targetPlayer.Character.PrimaryPart.Position)
+	end)
+	return attackEvent
+	]]
+	local attackFunction = function(character)
+		local gun = character:FindFirstChildWhichIsA("Tool")
+		local targetPlayer = creatureModule.getState(character, VALUE_NAME_TARGET_PLAYER).Value --I know this is bad design but I'm lazy
+		--print("Firing zombie's gun attack...")
+		--character.PrimaryPart.CFrame = CFrame.new(character.PrimaryPart.Position, targetPlayer.Character.PrimaryPart.Position)
+		--local facePlayerFrame = CFrame.new(character.PrimaryPart.Position, targetPlayer.PrimaryPart.Position)
+		
+		for i=0, math.random(1,numberOfShots) do
+			character.Humanoid:MoveTo(targetPlayer.Character.PrimaryPart.Position)
+			wait(0.1)
+			local fireEndpoint = gun.Handle.GunFireEndpoint.WorldPosition
+			if fireEndpoint == nil then print("ERROR: FIRE DIRECITON NOT IN GUN! MAKE AN ATTACHMENT!") return end
+			--local firePoint = Vector3.new(fireEndpoint.WorldPosition.X, targetPlayer.Character.PrimaryPart.Position.Y, fireEndpoint.WorldPosition.Z)
+			local firePoint = Vector3.new(fireEndpoint.X, targetPlayer.Character.UpperTorso.Position.Y, fireEndpoint.Z) --Vector3.new(targetPlayer.Character.PrimaryPart.Position.X, targetPlayer.Character.PrimaryPart.Position.Y, targetPlayer.Character.PrimaryPart.Position.Z)
+
+			if DEBUG_MODE then
+				local shape = game:GetService("ServerStorage"):WaitForChild("creatures"):WaitForChild("cylinder_debug_radius"):Clone()
+				shape.Transparency = 0.5
+				shape.Size = Vector3.new(0.5,0.5,0.5)
+				shape.Position = firePoint
+				shape.CanCollide = false
+				shape.Anchored = true
+				shape.Color = Color3.new(1, 0.666667, 0)
+				shape.Parent = character
+				shape.CanTouch = false
+				shape.Name = "debug_zombie_max_wander_distance"
+				Debris:AddItem(shape, 1)
+			end
+			gun.FireEvent:Fire(firePoint) 
+			
+		end -- end for
+		
+	end
+	
+	return attackFunction
+	
+end
+
+--slap for zombie
+m.getAttackSlap1 = function(character)
+	
+	print("setting up attack for " .. character.Name .. " at ")
+	
+	local function loadAttackAimation(character)
+		local humanoid = character:WaitForChild("Humanoid")
+		local animator = humanoid:WaitForChild("Animator")
+		local attackAnim = Instance.new("Animation")
+		attackAnim.AnimationId = "rbxassetid://6741699909"
+
+		local track = animator:LoadAnimation(attackAnim)
+		track.Priority = Enum.AnimationPriority.Action
+		return track
+	end
+	local attackTrack = loadAttackAimation(character)
+
+	local hitParts = {
+		character.LeftHand,
+		character.RightHand
+	}
+	local canDamageBoolean = m.setupAttackBoolean(character)
+	
+	local attackFunction = function()
+		--print("doing attack function")
+		coroutine.wrap(function()
+			
+			local eventsTable = m.damageTableParts(character, hitParts, canDamageBoolean)
+			
+			attackTrack:Play()	
+			local animTime = attackTrack.Length
+			wait(animTime)
+			for __, v in pairs(eventsTable) do
+				v:Disconnect()
+			end
+			creatureModule.setState(character, m.CAN_DAMAGE_BOOLEAN_NAME, false)
+			
+			--[[local target = creatureModule.getState(character, creatureModule.VALUE_NAME_TARGET_PLAYER).Value
+			local dist = (target.Character.PrimaryPart.Position - character.PrimaryPart.Position).Magnitude
+			print("dist from player is: " .. dist)
+			if dist < 3 then
+				target.Character.Humanoid:TakeDamage(5)
+			end
+			]]
+		end)()
+			
+	end
+	
+	return attackFunction
+end
+
+
+return m
